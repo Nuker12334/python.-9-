@@ -5,6 +5,8 @@ import base64
 import ast
 import operator
 import os
+import threading
+from flask import Flask
 
 # ------------------ Safe arithmetic evaluator ------------------
 def safe_eval_math(expr: str):
@@ -33,7 +35,7 @@ def safe_eval_math(expr: str):
     tree = ast.parse(expr, mode='eval')
     return _eval(tree.body)
 
-# ------------------ Deobfuscation core ------------------
+# ------------------ WeAreDevs deobfuscation core ------------------
 def deobfuscate_wearedevs(script: str) -> str:
     # Base64 decode
     def decode_base64(m):
@@ -61,6 +63,28 @@ def deobfuscate_wearedevs(script: str) -> str:
         script = re.sub(r'(".*?"|\'.*?\')\s*\.\.\s*(".*?"|\'.*?\')',
                         lambda m: m.group(1)[:-1] + m.group(2)[1:], script)
 
+    # Math inside string.char
+    def eval_math_in_call(m):
+        func = m.group(1)
+        args = m.group(2)
+        try:
+            parts = re.split(r',\s*', args)
+            evaluated = []
+            for p in parts:
+                p = p.strip()
+                if re.match(r'^[\d\s\+\-\*\/\%\(\)]+$', p):
+                    try:
+                        ev = safe_eval_math(p)
+                        evaluated.append(str(int(ev)) if ev == int(ev) else str(ev))
+                    except:
+                        evaluated.append(p)
+                else:
+                    evaluated.append(p)
+            return f"{func}({', '.join(evaluated)})"
+        except:
+            return m.group(0)
+    script = re.sub(r'(\w+)\s*\(\s*([^)]+)\s*\)', eval_math_in_call, script)
+
     # string.char conversion
     def string_char_to_str(m):
         try:
@@ -78,10 +102,25 @@ def deobfuscate_wearedevs(script: str) -> str:
     script = re.sub(r'\)\)\)\)', ')', script)
     return script.strip()
 
+# ------------------ Flask keep-alive ------------------
+app = Flask('')
+
+@app.route('/')
+def health():
+    return "Bot is alive"
+
+def run_web():
+    app.run(host='0.0.0.0', port=8080)
+
+def keep_alive():
+    t = threading.Thread(target=run_web)
+    t.daemon = True
+    t.start()
+
 # ------------------ Discord bot ------------------
 TOKEN = os.getenv("TOKEN")
 if not TOKEN:
-    raise ValueError("TOKEN environment variable not set. Add it in Railway Variables.")
+    raise ValueError("TOKEN environment variable not set. Add it in Render environment variables.")
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -116,4 +155,6 @@ async def deobfuscate_file(ctx):
     file = discord.File(fp=discord.BytesIO(deobfuscated.encode('utf-8')), filename="deobfuscated.txt")
     await ctx.send("Deobfuscated code:", file=file)
 
+# ------------------ Start both web server and bot ------------------
+keep_alive()
 bot.run(TOKEN)
